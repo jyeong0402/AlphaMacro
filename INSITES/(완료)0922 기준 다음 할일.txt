@@ -1,0 +1,10 @@
+0922 기준 다음 할일: 
+(완료)
+
+
+yfinance 데이터를 DB에 자동 저장
+FRED 및 뉴스 API 연결
+백테스트 지표 데이터 연결
+실제 프론트엔드 대시보드 개발
+WebSocket·알림 기능 추가
+PostgreSQL·Redis 기반 운영 환경 구성

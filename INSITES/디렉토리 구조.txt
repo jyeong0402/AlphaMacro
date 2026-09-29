@@ -1,0 +1,80 @@
+디렉토리 구조
+
+
+AlphaMacro의 **개발 명세서**와 기존 **프로젝트 구조 문서(구조1, 구조2)**, 그리고 **세부 기능 명세**를 통합하여 확장성과 유지보수성이 뛰어난 **FastAPI 백엔드 디렉토리 구조**를 설계했습니다.
+
+---
+
+### 📁 AlphaMacro 백엔드 전체 폴더 구조
+
+```text
+alphamacro_api/
+├── main.py                   # FastAPI 앱 진입점 및 Lifespan(AI 모델 로드) 관리
+├── database.py               # PostgreSQL DB 연결 및 SessionLocal 설정
+├── requirements.txt           # 프로젝트 의존성 패키지 목록 (FastAPI, PyTorch, Transformers 등)
+│
+├── core/                     # 앱 전역 설정, 보안 및 캐시 모듈
+│   ├── config.py             # 환경변수 및 .env 설정 관리
+│   ├── security.py           # JWT 인증 및 비밀번호 해싱 처리
+│   └── redis.py              # Redis P95 200ms 캐싱 연결 관리
+│
+├── models/                   # SQLAlchemy ORM 모델 (DB 테이블 정의)
+│   ├── __init__.py
+│   ├── user.py               # users 테이블
+│   ├── macro.py              # macro_indicators 테이블
+│   ├── stock.py              # stock_prices (주가, RSI, MACD 지표) 테이블
+│   ├── news.py               # financial_news (뉴스/공시 감성 스코어 및 요약) 테이블
+│   └── backtest.py           # backtest_records & backtest_trades 테이블
+│
+├── schemas/                  # Pydantic 데이터 검증 및 변환 스키마
+│   ├── __init__.py
+│   ├── auth.py               # 로그인 및 사용자 인증 스키마
+│   ├── macro.py              # 매크로 지표 상관관계 분석 요청/응답 스키마
+│   ├── ai.py                 # 뉴스 감성 분석 스코어 및 요약 응답 스키마
+│   ├── backtest.py           # 백테스팅 조건식 및 결과 스키마
+│   └── user.py               # 온보딩 프로파일링 및 위젯 대시보드 설정 스키마
+│
+├── services/                 # 핵심 비즈니스 로직 및 분석/AI 엔진
+│   ├── __init__.py
+│   ├── ai_engine.py          # PyTorch 기반 FinBERT 서버 로컬 AI 추론 엔진
+│   ├── backtest_engine.py    # Pandas/Numpy 백테스팅 엔진 (수수료, 슬리피지, Look-ahead bias 방지)
+│   ├── macro_analytics.py    # 일간 수익률 변환, 피어슨 상관계수, RSI/MACD 연산
+│   └── collector.py          # 외부 데이터 수집 (Yahoo Finance, FRED API, 뉴스/SEC 크롤링)
+│
+├── tasks/                    # 비동기 데이터 갱신 배치 (Polling & Scheduler)
+│   ├── __init__.py
+│   └── data_refresh.py       # 서머타임(DST) 고려 KST 06:00 배치 확인/저장
+│
+└── routers/                  # API 라우터 엔드포인트
+    ├── __init__.py
+    ├── auth.py               # 인증 관련 API (/api/v1/auth)
+    ├── macro.py              # 매크로 지표 상관분석 API (/api/v1/macro/correlation)
+    ├── ai.py                 # AI 뉴스 감성 분석 API (/api/v1/ai/sentiment)
+    ├── backtest.py           # 백테스팅 실행 API (/api/v1/backtest/run)
+    └── user.py               # 투자 성향 온보딩 및 맞춤 대시보드/알림 API (/api/v1/user)
+```
+
+---
+
+### 💡 주요 모듈별 역할 및 설계 특징
+
+1. **`main.py` & Lifespan 관리**
+   - FastAPI의 `@asynccontextmanager` Lifespan을 적용하여 서버가 구동될 때 PyTorch FinBERT 모델을 메모리에 1회 적재하여 API 호출 시의 추론 지연을 없앱니다.
+
+2. **`services/` (핵심 파이프라인 분리)**
+   - **`ai_engine.py`**: 서버 로컬 AI(Server-side Local AI) 방식으로 PyTorch FinBERT 모델을 구동하여 감성 지수(-1.0 ~ +1.0) 계산 및 요약을 수행합니다.
+   - **`backtest_engine.py`**: Pandas/Numpy 기반으로 거래 수수료, 슬리피지, \\(t+1\\)일 시가 체결(Look-ahead Bias 방지)을 반영하고 Benchmark(S&P 500) 대비 CAGR, MDD, Sharpe Ratio를 산출합니다.
+   - **`macro_analytics.py`**: 추세 왜곡 방지를 위해 일간 수익률(Daily Return) 기준으로 변환 후 피어슨 상관계수 및 RSI(14)/MACD 상태를 연산합니다.
+
+3. **`models/` & `schemas/` (도메인 단위 분리)**
+   - 초기 구조 문서의 단일 파일 구조(`models.py`, `schemas.py`)를 확장하여 도메인별(user, macro, stock, news, backtest) 파일로 디렉토리화함으로써 신규 지표나 스키마 추가 시 코드 충돌을 예방합니다.
+
+4. **`tasks/data_refresh.py` (비기능 요구사항 처리)**
+   - 서머타임(DST) 시차를 감안하여 KST 06:00 이후 외부 데이터 제공자의 최신 데이터 업데이트 여부를 폴링(Polling)한 뒤 일괄 저장합니다.
+
+5. **`routers/user.py` (개인화 기능 지원)**
+   - 사용자 온보딩 기반 투자 성향 프로파일링, 모듈형 위젯 대시보드 구성, 조건부 푸시 알림 세팅 관련 엔드포인트를 담당합니다.
+
+---
+
+💡 혹시 이 구조를 바탕으로 특정 모듈(예: `services/backtest_engine.py`나 `services/macro_analytics.py`)의 실제 파이썬 구현 코드를 작성해 볼까요?

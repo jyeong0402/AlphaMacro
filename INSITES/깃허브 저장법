@@ -1,0 +1,9 @@
+
+cd D:\3B\PROJECT\AlphaMacro
+
+git init
+git add .
+git commit -m "Initial commit"
+git branch -M main
+git remote add origin https://github.com/사용자명/저장소명.git
+git push -u origin main

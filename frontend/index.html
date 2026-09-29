@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AlphaMacro | Market intelligence</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#">ALPHA<span>MACRO</span></a>
+    <div class="connection"><i></i><span id="api-status">Checking API…</span></div>
+    <button class="ghost" id="login-open">Sign in</button>
+  </header>
+  <main>
+    <section class="hero">
+      <div><p class="eyebrow">MACRO-DRIVEN INTELLIGENCE</p><h1>See the forces<br><em>behind the market.</em></h1>
+      <p class="subhead">Track price action, macro signals, and strategy performance in one focused workspace.</p></div>
+      <div class="hero-mark">α<span>μ</span></div>
+    </section>
+    <section class="toolbar card">
+      <label>Symbol <input id="ticker" value="SPY" maxlength="10"></label>
+      <label>Macro indicator <input id="indicator" value="DFF"></label>
+      <label>Period <select id="period"><option>1M</option><option>3M</option><option selected>1Y</option><option>5Y</option></select></label>
+      <button class="primary" id="refresh">Refresh overview</button>
+    </section>
+    <section class="grid overview">
+      <article class="card stat"><span class="label">Correlation</span><strong id="correlation">—</strong><small id="correlation-note">stock / macro returns</small></article>
+      <article class="card stat"><span class="label">Latest RSI</span><strong id="rsi">—</strong><small>14-day momentum</small></article>
+      <article class="card stat"><span class="label">Latest MACD</span><strong id="macd">—</strong><small>trend signal</small></article>
+      <article class="card sentiment"><div><span class="label">News sentiment</span><strong id="sentiment">—</strong></div><span id="sentiment-label" class="pill">No data</span></article>
+    </section>
+    <section class="grid content">
+      <article class="card chart-card"><div class="section-head"><div><p class="eyebrow">RELATIONSHIP</p><h2>Market vs macro</h2></div><span id="chart-caption">—</span></div><canvas id="correlation-chart"></canvas><div id="overview-error" class="notice hidden"></div></article>
+      <article class="card news-card"><div class="section-head"><div><p class="eyebrow">SIGNAL FEED</p><h2>Latest news</h2></div><span id="news-ticker">SPY</span></div><div id="news-list"><div class="empty">Load an overview to see headlines.</div></div></article>
+    </section>
+    <section class="card backtest"><div class="section-head"><div><p class="eyebrow">RESEARCH LAB</p><h2>Run a backtest</h2></div><span class="muted">Authentication required</span></div>
+      <form id="backtest-form" class="form-grid">
+        <label>Ticker<input name="ticker" value="SPY" required></label><label>Start date<input name="start_date" type="date" required></label><label>End date<input name="end_date" type="date" required></label><label>Capital<input name="initial_capital" type="number" value="10000" min="1" step="100"></label>
+        <label>Buy indicator<input name="buy_indicator" placeholder="RSI"></label><label>Buy operator<select name="buy_operator"><option>&lt;</option><option>&gt;</option><option>&gt;=</option></select></label><label>Buy value<input name="buy_value" type="number" placeholder="30"></label><button class="primary" type="submit">Run strategy</button>
+      </form><div id="backtest-result" class="result hidden"></div>
+    </section>
+  </main>
+  <dialog id="login-dialog"><form method="dialog" id="login-form"><button class="close" value="cancel">×</button><p class="eyebrow">ACCOUNT</p><h2>Sign in to research</h2><input name="email" type="email" placeholder="you@example.com" required><input name="password" type="password" placeholder="Password" required><button class="primary">Sign in</button><p id="login-message" class="muted"></p></form></dialog>
+  <script src="app.js"></script>
+</body>
+</html>

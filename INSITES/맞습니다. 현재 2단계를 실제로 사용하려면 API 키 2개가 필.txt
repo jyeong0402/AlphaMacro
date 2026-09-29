@@ -1,0 +1,90 @@
+맞습니다. **현재 2단계를 실제로 사용하려면 API 키 2개가 필요합니다.**
+
+| 용도 | 서비스 | 환경변수 |
+|---|---|---|
+| 금리·경제지표 | FRED | `FRED_API_KEY` |
+| 금융 뉴스 | NewsAPI | `NEWS_API_KEY` |
+
+`.env` 파일에 다음처럼 입력하면 됩니다.
+
+```env
+FRED_API_KEY=발급받은_FRED_키
+NEWS_API_KEY=발급받은_NewsAPI_키
+```
+
+다만 기능별로 나누면 다음과 같습니다.
+
+### 현재 필요한 키
+
+#### FRED API 키
+
+사용 목적:
+
+- 미국 기준금리
+- 10년물 국채금리
+- CPI
+- 실업률
+- GDP
+- 각종 거시경제 지표
+
+발급:
+
+[FRED API Key 발급 페이지](https://fred.stlouisfed.org/docs/api/fred/v2/api_key.html)
+
+#### NewsAPI 키
+
+사용 목적:
+
+- 종목 관련 뉴스 검색
+- 뉴스 제목·본문 수집
+- 감성 분석용 데이터 확보
+- 긍정·부정 뉴스 비율 계산
+
+발급:
+
+[NewsAPI 회원가입 페이지](https://newsapi.org/register)
+
+### 지금 당장 필요하지 않은 것
+
+주가 데이터는 현재 `yfinance`를 사용하므로 별도 API 키가 필요하지 않습니다.
+
+```text
+주가: yfinance → API 키 불필요
+거시경제: FRED → API 키 필요
+뉴스: NewsAPI → API 키 필요
+```
+
+Redis도 API 키가 아니라 로컬 Redis 서버 접속 설정입니다. 현재 실행하지 않아도 됩니다.
+
+두 키를 발급받은 뒤 프로젝트 루트에 `.env` 파일을 만들고 다음처럼 넣으면 됩니다.
+
+```env
+FRED_API_KEY=실제_FRED_키
+NEWS_API_KEY=실제_NewsAPI_키
+```
+
+그 다음 서버를 재시작하고 다음 명령을 실행합니다.
+
+```powershell
+cd C:\3-B\Project\AlphaMacro
+
+$python = "$env:LocalAppData\Programs\Python\Python312\python.exe"
+
+& $python -m alphamacro_api.tasks.import_external `
+  --indicator DFF `
+  --series-id DFF `
+  --ticker NVDA `
+  --start 2025-01-01 `
+  --end 2025-02-01
+```
+
+이 명령은:
+
+1. FRED에서 `DFF` 기준금리 데이터를 다운로드
+2. NewsAPI에서 `NVDA` 뉴스를 다운로드
+3. FRED 데이터는 `macro_indicators`에 저장
+4. 뉴스 데이터는 `financial_news`에 저장
+
+합니다.
+
+**작업 완료:** 네, 현재 FRED 거시경제 데이터와 NewsAPI 금융 뉴스를 실제로 수집하려면 `FRED_API_KEY`와 `NEWS_API_KEY` 두 개가 필요합니다. 주가 데이터는 yfinance를 사용하므로 별도 증권 API 키가 필요하지 않습니다. 두 키를 프로젝트 루트 `.env`에 저장한 후 `import_external` 명령으로 FRED와 뉴스 데이터를 DB에 저장하면 됩니다.

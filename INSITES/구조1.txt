@@ -1,0 +1,302 @@
+전체 시스템을 구성하는 핵심 파이프라인(DB ➔ 데이터 검증 ➔ AI 추론 ➔ 백테스팅 엔진 ➔ API 라우터)이 모두 맞물려 돌아가는 **MVP 수준의 백엔드(FastAPI) 전체 코드**를 작성했습니다.
+
+실제 프로덕션 레벨처럼 역할별로 디렉토리를 분리한 구조입니다.
+
+### 📁 프로젝트 디렉토리 구조
+
+```text
+alphamarket_api/
+├── main.py
+├── database.py
+├── models.py
+├── schemas.py
+├── services/
+│   ├── ai_engine.py
+│   └── backtest_engine.py
+└── routers/
+    ├── macro.py
+    └── backtest.py
+
+```
+
+---
+
+### 1. `database.py` (DB 설정)
+
+SQLAlchemy를 이용한 PostgreSQL 연결 설정입니다.
+
+```python
+from sqlalchemy import create_engine
+from sqlalchemy.orm import declarative_base, sessionmaker
+
+# 실제 환경에서는 .env로 관리
+SQLALCHEMY_DATABASE_URL = "postgresql://user:password@localhost/alphamarket"
+
+engine = create_engine(SQLALCHEMY_DATABASE_URL)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+Base = declarative_base()
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+```
+
+### 2. `models.py` (ORM 스키마)
+
+명세서에 정의된 세부 테이블 구조입니다.
+
+```python
+from sqlalchemy import Column, String, Float, Date, DateTime, BigInteger, ForeignKey
+from database import Base
+import uuid
+from datetime import datetime
+
+class StockPrice(Base):
+    __tablename__ = "stock_prices"
+    ticker = Column(String(10), primary_key=True)
+    date = Column(Date, primary_key=True)
+    open_price = Column(Float)
+    high_price = Column(Float)
+    low_price = Column(Float)
+    close_price = Column(Float)
+    volume = Column(BigInteger)
+    rsi_14 = Column(Float)
+    macd = Column(Float)
+    macd_signal = Column(Float)
+
+class FinancialNews(Base):
+    __tablename__ = "financial_news"
+    news_id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    ticker = Column(String(10), index=True)
+    title = Column(String)
+    sentiment_score = Column(Float)
+    summary = Column(String)
+    published_at = Column(DateTime, default=datetime.utcnow)
+
+class BacktestRecord(Base):
+    __tablename__ = "backtest_records"
+    backtest_id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    strategy_name = Column(String(100))
+    cagr = Column(Float)
+    mdd = Column(Float)
+    sharpe_ratio = Column(Float)
+    total_return = Column(Float)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+```
+
+### 3. `schemas.py` (API 데이터 검증)
+
+요청과 응답 데이터를 Pydantic으로 엄격하게 타입 캐스팅합니다.
+
+```python
+from pydantic import BaseModel
+from typing import List, Optional
+from datetime import date
+
+class BacktestCondition(BaseModel):
+    indicator: str
+    operator: str
+    value: float
+
+class BacktestRequest(BaseModel):
+    ticker: str
+    start_date: date
+    end_date: date
+    initial_capital: float = 10000000
+    buy_conditions: List[BacktestCondition]
+    commission_rate: float = 0.0005
+    slippage_rate: float = 0.001
+
+class SentimentResponse(BaseModel):
+    ticker: str
+    sentiment_score: float
+    sentiment_label: str
+    summary: List[str]
+
+```
+
+### 4. `services/ai_engine.py` (PyTorch 서버 로컬 AI)
+
+FinBERT를 활용한 감성 분석 파이프라인입니다.
+
+```python
+import torch
+import torch.nn.functional as F
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
+
+class ServerLocalAI:
+    def __init__(self):
+        self.model_name = "ProsusAI/finbert"
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+        self.tokenizer = None
+        self.model = None
+
+    def load(self):
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+        self.model = AutoModelForSequenceClassification.from_pretrained(self.model_name)
+        self.model.to(self.device).eval()
+
+    def analyze(self, text_list: list[str]) -> float:
+        if not text_list: return 0.0
+        inputs = self.tokenizer(text_list, padding=True, truncation=True, max_length=512, return_tensors="pt").to(self.device)
+        
+        with torch.no_grad():
+            outputs = self.model(**inputs)
+            probs = F.softmax(outputs.logits, dim=1)
+            
+        scores = probs[:, 0] - probs[:, 1] # Positive - Negative
+        return round(scores.mean().item(), 4)
+
+ai_engine = ServerLocalAI()
+
+```
+
+### 5. `services/backtest_engine.py` (Pandas 백테스트 코어)
+
+미래 참조 편향(Look-ahead bias) 방지와 슬리피지를 적용한 알고리즘입니다.
+
+```python
+import pandas as pd
+import numpy as np
+
+class BacktestEngine:
+    @staticmethod
+    def run(df: pd.DataFrame, req_data) -> dict:
+        """
+        df: 날짜순으로 정렬된 OHLCV 및 지표 데이터 (Index: Date)
+        """
+        capital = req_data.initial_capital
+        position = 0 # 보유 주식 수
+        
+        # 1. 시그널 생성 (예: 단순 RSI 예시)
+        # 미래 참조 방지를 위해 전일(shift(1)) 데이터를 기준으로 시그널 판단
+        df['Buy_Signal'] = (df['rsi_14'].shift(1) <= 30)
+        df['Sell_Signal'] = (df['rsi_14'].shift(1) >= 70)
+        
+        portfolio_values = []
+        
+        # 2. 시뮬레이션 순회
+        for date, row in df.iterrows():
+            # 매수 (t+1일 시가 기준 + 슬리피지/수수료)
+            if row['Buy_Signal'] and position == 0:
+                buy_price = row['open_price'] * (1 + req_data.slippage_rate)
+                position = (capital * (1 - req_data.commission_rate)) // buy_price
+                capital -= position * buy_price
+                
+            # 매도
+            elif row['Sell_Signal'] and position > 0:
+                sell_price = row['open_price'] * (1 - req_data.slippage_rate)
+                capital += position * sell_price * (1 - req_data.commission_rate)
+                position = 0
+                
+            # 포트폴리오 평가액
+            current_value = capital + (position * row['close_price'])
+            portfolio_values.append(current_value)
+            
+        df['Portfolio_Value'] = portfolio_values
+        
+        # 3. 성과 지표 계산
+        total_return = (df['Portfolio_Value'].iloc[-1] / req_data.initial_capital) - 1
+        days = (df.index[-1] - df.index[0]).days
+        cagr = (1 + total_return) ** (365.0 / days) - 1 if days > 0 else 0
+        
+        # MDD 계산
+        roll_max = df['Portfolio_Value'].cummax()
+        drawdown = df['Portfolio_Value'] / roll_max - 1.0
+        mdd = drawdown.min()
+        
+        return {
+            "cagr": round(cagr * 100, 2),
+            "mdd": round(mdd * 100, 2),
+            "total_return": round(total_return * 100, 2),
+            "sharpe_ratio": 1.2 # 단순 예시값
+        }
+
+```
+
+### 6. `routers/api.py` (엔드포인트 연동)
+
+라우터에서 비동기로 AI와 백테스트 엔진을 호출합니다.
+
+```python
+from fastapi import APIRouter, Depends
+import asyncio
+import pandas as pd
+from schemas import SentimentResponse, BacktestRequest
+from services.ai_engine import ai_engine
+from services.backtest_engine import BacktestEngine
+# from database import get_db
+
+router = APIRouter(prefix="/api/v1")
+
+@router.get("/ai/sentiment/{ticker}", response_model=SentimentResponse)
+async def get_sentiment(ticker: str):
+    mock_news = [f"{ticker} announces new AI chips.", "Market shows mixed feelings."]
+    
+    # 비동기 환경에서 I/O 블로킹 방지를 위한 스레드 풀 실행
+    score = await asyncio.to_thread(ai_engine.analyze, mock_news)
+    label = "positive" if score > 0.2 else "negative" if score < -0.2 else "neutral"
+    
+    return SentimentResponse(
+        ticker=ticker, sentiment_score=score, sentiment_label=label, summary=mock_news
+    )
+
+@router.post("/backtest/run")
+async def run_backtest(request: BacktestRequest):
+    # TODO: DB에서 request 범위의 OHLCV Pandas DataFrame 추출
+    # 임시 목업 데이터 생성
+    dates = pd.date_range(request.start_date, request.end_date, freq='B')
+    mock_df = pd.DataFrame({
+        'open_price': 100, 'close_price': 105, 'rsi_14': np.random.uniform(20, 80, len(dates))
+    }, index=dates)
+    
+    result = BacktestEngine.run(mock_df, request)
+    return result
+
+```
+
+### 7. `main.py` (FastAPI 앱 구동)
+
+Lifespan으로 서버 시작 시 PyTorch 모델을 메모리에 1회 적재합니다.
+
+```python
+from fastapi import FastAPI
+from contextlib import asynccontextmanager
+from routers.api import router
+from services.ai_engine import ai_engine
+import models
+from database import engine
+
+# DB 테이블 생성
+models.Base.metadata.create_all(bind=engine)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # 서버 기동 시 AI 모델 적재
+    print("Loading AI Model into memory...")
+    ai_engine.load()
+    print("Ready.")
+    yield
+    print("Shutting down.")
+
+app = FastAPI(
+    title="AlphaMarket",
+    description="Macro-Driven Stock Intelligence Platform",
+    lifespan=lifespan
+)
+
+app.include_router(router)
+
+```
+
+---
+
+전반적인 데이터 흐름과 로직 처리를 체계적으로 나누어 담았습니다.
+
+이 상태에서 실제 시장 데이터 수집 파이프라인(Yahoo Finance / FRED 연동)을 먼저 붙여볼까요, 아니면 백테스팅 시그널을 비동기 워커로 넘겨서 **성능을 최적화**하는 부분을 먼저 다뤄볼까요?

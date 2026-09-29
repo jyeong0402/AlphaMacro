@@ -1,0 +1,316 @@
+AlphaMacro API 발급방법
+
+
+
+Searched the web for `공식 사이트 기준 FRED API key 발급 방법 Alpha Vantage API key 발급 NewsAPI API key 발급 방법 2026`
+Completed with input: {
+  "query": "공식 사이트 기준 FRED API key 발급 방법 Alpha Vantage API key 발급 NewsAPI API key 발급 방법 2026"
+}
+
+Searched the web for `official API key signup FRED API Alpha Vantage NewsAPI Polygon.io Finnhub Twe...`
+Completed with input: {
+  "query": "official API key signup FRED API Alpha Vantage NewsAPI Polygon.io Finnhub Twelve Data documentation"
+}
+
+Added reference "FRED API key documentation"
+Completed with input: {
+  "type": "website",
+  "label": "FRED API key documentation",
+  "isArtifact": false,
+  "link": "https://fred.stlouisfed.org/docs/api/fred/v2/api_key.html"
+}
+
+Added reference "NewsAPI registration"
+Completed with input: {
+  "type": "website",
+  "label": "NewsAPI registration",
+  "isArtifact": false,
+  "link": "https://newsapi.org/register"
+}
+
+Added reference "Alpha Vantage API key signup"
+Completed with input: {
+  "type": "website",
+  "label": "Alpha Vantage API key signup",
+  "isArtifact": false,
+  "link": "https://www.alphavantage.co/support/#api-key"
+}
+
+아래 방식으로 발급받으면 됩니다. c에서는 **모든 API 키가 필요한 것은 아닙니다.**
+
+## 1. FRED API 키
+
+FRED는 미국 기준금리, 국채금리, 실업률, CPI 등의 거시경제 데이터를 제공합니다.
+
+### 발급 순서
+
+1. [FRED 공식 사이트](https://fred.stlouisfed.org/) 접속
+2. 계정 생성 또는 로그인
+3. [FRED API Key 발급 페이지](https://fred.stlouisfed.org/docs/api/fred/v2/api_key.html) 접속
+4. API 사용 목적 입력
+5. 약관 동의 후 키 발급
+
+발급받은 키는 보통 다음처럼 사용합니다.
+
+```text
+FRED_API_KEY=발급받은_FRED_키
+```
+
+AlphaMacro에서 FRED를 사용하면 다음 데이터를 가져올 수 있습니다.
+
+- 미국 기준금리
+- 10년물 국채금리
+- CPI
+- 실업률
+- 달러지수 관련 지표
+- GDP
+- 경제성장률
+
+---
+
+## 2. 뉴스 API 키
+
+뉴스 감성 분석을 사용하려면 뉴스 데이터를 가져올 서비스가 필요합니다.
+
+가장 간단한 선택지는 NewsAPI입니다.
+
+### NewsAPI 발급 순서
+
+1. [NewsAPI 회원가입 페이지](https://newsapi.org/register) 접속
+2. 이메일과 비밀번호로 회원가입
+3. 이메일 인증
+4. 대시보드에서 API 키 확인
+5. 키를 `.env`에 저장
+
+```text
+NEWS_API_KEY=발급받은_NewsAPI_키
+```
+
+뉴스 요청에는 보통 다음과 같이 사용합니다.
+
+```python
+import httpx
+
+response = httpx.get(
+    "https://newsapi.org/v2/everything",
+    params={
+        "q": "NVDA",
+        "language": "en",
+        "apiKey": settings.news_api_key,
+    },
+)
+
+news_data = response.json()
+```
+
+뉴스 API는 다음 기능에 사용됩니다.
+
+- 특정 종목 뉴스 검색
+- 뉴스 제목·본문 수집
+- 뉴스 날짜별 타임라인 구성
+- FinBERT 감성 분석 입력 데이터 생성
+- 긍정·부정·중립 뉴스 비율 계산
+
+주의할 점은 무료 요금제의 호출량과 상업적 사용 조건입니다. 실제 서비스로 배포하기 전에 요금제와 라이선스를 확인해야 합니다.
+
+---
+
+## 3. 증권 데이터 API 키
+
+증권 데이터는 여러 업체 중 하나만 선택하면 됩니다.
+
+### 선택지 A: yfinance
+
+현재 AlphaMacro 코드에는 `yfinance`가 포함되어 있습니다.
+
+```python
+import yfinance as yf
+
+data = yf.download(
+    "NVDA",
+    start="2024-01-01",
+    end="2025-01-01",
+)
+```
+
+`yfinance`는 일반적으로 별도의 API 키 없이 사용할 수 있습니다.
+
+따라서 개발 초기에는 다음처럼 진행하는 것이 가장 쉽습니다.
+
+```text
+주가 데이터: yfinance
+거시경제 데이터: FRED
+뉴스 데이터: NewsAPI
+```
+
+---
+
+### 선택지 B: Alpha Vantage
+
+[Alpha Vantage API 키 발급 페이지](https://www.alphavantage.co/support/#api-key)에서 발급받을 수 있습니다.
+
+발급 후 `.env`에 저장합니다.
+
+```text
+ALPHA_VANTAGE_API_KEY=발급받은_키
+```
+
+호출 예시:
+
+```text
+https://www.alphavantage.co/query
+?function=TIME_SERIES_DAILY
+&symbol=NVDA
+&apikey=발급받은_키
+```
+
+장점:
+
+- 공식 API 형태가 명확함
+- 주가·환율·기술지표 제공
+- RSI, MACD 등의 API 기능 제공
+
+단점:
+
+- 무료 요금제 호출 제한
+- 호출량이 많으면 유료 요금제 필요
+
+---
+
+### 선택지 C: Finnhub
+
+[Finnhub 회원가입](https://finnhub.io/register) 후 API 키를 발급받을 수 있습니다.
+
+```text
+FINNHUB_API_KEY=발급받은_키
+```
+
+제공 기능:
+
+- 실시간 또는 지연 주가
+- 기업 프로필
+- 기업 뉴스
+- 재무 데이터
+- 종목 추천 데이터
+
+---
+
+### 선택지 D: Twelve Data
+
+[Twelve Data 가입 페이지](https://twelvedata.com/signup)에서 계정을 만든 뒤 대시보드에서 API 키를 확인합니다.
+
+```text
+TWELVE_DATA_API_KEY=발급받은_키
+```
+
+제공 기능:
+
+- 주가
+- 외환
+- 암호화폐
+- RSI
+- MACD
+- 이동평균선
+
+---
+
+## AlphaMacro에 필요한 최소 조합
+
+현재 프로젝트를 개발용으로 실행하려면 다음 조합을 추천합니다.
+
+```text
+주가 데이터: yfinance
+거시경제 데이터: FRED API
+뉴스 데이터: NewsAPI
+AI 분석: FinBERT
+데이터베이스: SQLite
+캐시: Redis 선택 사항
+```
+
+`.env` 파일 예시는 다음과 같습니다.
+
+```env
+DATABASE_URL=sqlite:///./alphamacro.db
+
+JWT_SECRET=개발용_긴_비밀문자열
+JWT_ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=60
+
+FRED_API_KEY=여기에_FRED_키
+NEWS_API_KEY=여기에_NewsAPI_키
+
+FINBERT_ENABLED=false
+FINBERT_MODEL=ProsusAI/finbert
+
+REDIS_URL=redis://localhost:6379/0
+```
+
+처음에는 다음 두 개만 있어도 됩니다.
+
+```env
+FRED_API_KEY=발급받은_FRED_키
+NEWS_API_KEY=발급받은_NewsAPI_키
+```
+
+`yfinance`를 사용할 경우 증권사 API 키는 당장 필요하지 않습니다.
+
+---
+
+## API 키를 코드에 직접 작성하면 안 되는 이유
+
+다음처럼 코드에 직접 작성하면 안 됩니다.
+
+```python
+FRED_API_KEY = "abcdef123456"
+```
+
+이유는 다음과 같습니다.
+
+- GitHub에 코드가 올라가면 키가 노출됨
+- 다른 사람이 내 호출 한도를 사용함
+- 유료 API라면 비용이 발생할 수 있음
+- 키를 폐기하고 새로 발급해야 함
+
+대신 `.env`와 `pydantic-settings`를 사용합니다.
+
+```env
+FRED_API_KEY=실제키
+```
+
+```python
+from pydantic_settings import BaseSettings
+
+
+class Settings(BaseSettings):
+    fred_api_key: str | None = None
+    news_api_key: str | None = None
+
+    model_config = {
+        "env_file": ".env",
+        "extra": "ignore",
+    }
+```
+
+그리고 `.gitignore`에 반드시 추가합니다.
+
+```gitignore
+.env
+*.db
+__pycache__/
+```
+
+## 정리
+
+| 용도 | 추천 서비스 | API 키 필요 여부 |
+|---|---|---:|
+| 주가 데이터 | yfinance | 보통 불필요 |
+| 미국 경제지표 | FRED | 필요 |
+| 금융 뉴스 | NewsAPI | 필요 |
+| 주가·기술지표 대체 | Alpha Vantage | 필요 |
+| 실시간 금융 데이터 대체 | Finnhub | 필요 |
+| 주가·기술지표 대체 | Twelve Data | 필요 |
+| 감성 분석 | FinBERT | 자체 모델 사용 시 별도 API 키 불필요 |
+
+개발 초기에는 **FRED + NewsAPI만 발급**하고, 주가는 `yfinance`로 처리하는 구성이 가장 간단합니다.
+
+**작업 완료:** FRED, NewsAPI, Alpha Vantage 등 API 키 발급 절차와 AlphaMacro에서의 사용 목적을 설명했습니다. 개발 초기에는 주가를 yfinance로 받아 증권 API 키 없이 사용하고, FRED와 NewsAPI 키만 발급하는 구성을 추천했습니다. API 키는 `.env`에 저장하고 코드나 GitHub에 직접 노출하지 않도록 안내했습니다.

@@ -1,0 +1,439 @@
+[구조] AlphaMacro
+
+
+AlphaMacro의 요구사항을 반영하여, 유지보수와 확장이 용이하도록 모듈화된 FastAPI 프로젝트 구조를 작성했습니다.
+
+데이터베이스 모델(SQLAlchemy), 데이터 검증 스키마(Pydantic), 그리고 각 도메인별 라우터(APIRouter)로 역할을 분리한 기본 뼈대입니다.
+
+### 📁 프로젝트 디렉토리 구조 예상
+
+```text
+macrostock_api/
+├── main.py              # FastAPI 애플리케이션 진입점
+├── database.py          # DB 연결 및 세션 관리
+├── models.py            # SQLAlchemy ORM 모델 (DB 스키마)
+├── schemas.py           # Pydantic 스키마 (요청/응답 검증)
+└── routers/             # API 라우터 모음
+    ├── auth.py
+    ├── macro.py
+    └── backtest.py
+
+```
+
+---
+
+### 1. `models.py` (데이터베이스 ORM 모델)
+
+PostgreSQL 데이터베이스 테이블과 1:1 매핑되는 SQLAlchemy 모델입니다.
+
+```python
+from sqlalchemy import Column, Integer, String, Float, Date, DateTime, ForeignKey, UniqueConstraint
+from sqlalchemy.orm import declarative_base, relationship
+from datetime import datetime
+import uuid
+
+Base = declarative_base()
+
+class User(Base):
+    __tablename__ = "users"
+    
+    user_id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    email = Column(String(255), unique=True, index=True, nullable=False)
+    password_hash = Column(String(255), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    backtests = relationship("BacktestRecord", back_populates="user")
+
+class MacroIndicator(Base):
+    __tablename__ = "macro_indicators"
+    
+    indicator_id = Column(Integer, primary_key=True, autoincrement=True)
+    symbol = Column(String(20), index=True, nullable=False) # US10Y, VIX 등
+    date = Column(Date, nullable=False)
+    value = Column(Float, nullable=False)
+    
+    __table_args__ = (UniqueConstraint('symbol', 'date', name='uq_macro_symbol_date'),)
+
+class StockPrice(Base):
+    __tablename__ = "stock_prices"
+    
+    ticker = Column(String(10), primary_key=True)
+    date = Column(Date, primary_key=True)
+    close_price = Column(Float, nullable=False)
+    rsi_14 = Column(Float, nullable=True)
+    macd = Column(Float, nullable=True)
+
+class BacktestRecord(Base):
+    __tablename__ = "backtest_records"
+    
+    backtest_id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String, ForeignKey("users.user_id"), nullable=False)
+    strategy_name = Column(String(100), nullable=False)
+    cagr = Column(Float, nullable=True)
+    mdd = Column(Float, nullable=True)
+    sharpe_ratio = Column(Float, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    user = relationship("User", back_populates="backtests")
+
+```
+
+---
+
+### 2. `schemas.py` (Pydantic 데이터 검증 스키마)
+
+API 요청(Request) 및 응답(Response) 시 데이터 타입과 형식을 엄격하게 검증합니다.
+
+```python
+from pydantic import BaseModel, Field
+from typing import List, Optional
+from datetime import date
+
+# 매크로 관련 스키마
+class CorrelationResponse(BaseModel):
+    ticker: str
+    indicator: str
+    period: str
+    correlation_coefficient: float
+    chart_data: List[dict] # 날짜, 주가, 매크로 지표 값을 포함하는 시계열 리스트
+
+class SentimentResponse(BaseModel):
+    ticker: str
+    sentiment_score: float = Field(..., ge=-1.0, le=1.0)
+    summary: List[str]
+
+# 백테스팅 관련 스키마
+class BacktestRunRequest(BaseModel):
+    ticker: str
+    start_date: date
+    end_date: date
+    initial_capital: float = Field(..., gt=0)
+    buy_conditions: str
+    sell_conditions: str
+
+class BacktestRunResponse(BaseModel):
+    backtest_id: str
+    cagr: float
+    mdd: float
+    sharpe_ratio: float
+    trade_logs: List[dict] # 거래 일지
+
+```
+
+---
+
+### 3. `routers/macro.py` (매크로 & AI 분석 라우터)
+
+매크로 지표와의 상관관계 및 온디바이스 AI 감성 분석 엔드포인트를 처리합니다.
+
+```python
+from fastapi import APIRouter, Depends, HTTPException, Query
+from typing import Optional
+import schemas
+# from database import get_db
+# from sqlalchemy.orm import Session
+
+router = APIRouter(prefix="/api/v1", tags=["Macro & Analytics"])
+
+@router.get("/macro/correlation", response_model=schemas.CorrelationResponse)
+async def get_correlation(
+    ticker: str = Query(..., description="주식 Ticker (예: NVDA)"),
+    indicator: str = Query(..., description="매크로 지표 (예: US10Y, VIX)"),
+    period: str = Query("1Y", description="조회 기간 (1M, 3M, 1Y, 5Y)")
+    # db: Session = Depends(get_db)
+):
+    """
+    주식 가격과 매크로 지표 간의 피어슨 상관계수 및 시계열 데이터를 반환합니다.
+    (실제 구현 시 Pandas를 활용하여 DB 데이터를 가공)
+    """
+    # TODO: DB에서 ticker와 indicator 데이터 조회 후 Pandas 병합 및 상관계수 계산
+    mock_data = {
+        "ticker": ticker.upper(),
+        "indicator": indicator.upper(),
+        "period": period,
+        "correlation_coefficient": -0.65,
+        "chart_data": [{"date": "2026-09-15", "price": 140.5, "indicator_val": 4.1}]
+    }
+    return mock_data
+
+@router.get("/ai/sentiment/{ticker}", response_model=schemas.SentimentResponse)
+async def get_ai_sentiment(ticker: str):
+    """
+    관심 종목의 최근 공시 및 뉴스를 분석하여 긍정/부정 감성 점수와 요약을 제공합니다.
+    """
+    # TODO: 로컬 PyTorch 모델(FinBERT) 등을 추론 엔진에 넘겨 결과 수신
+    mock_sentiment = {
+        "ticker": ticker.upper(),
+        "sentiment_score": 0.72,
+        "summary": [
+            "최근 AI 수요 폭증으로 인한 가이던스 상향",
+            "차세대 칩 양산 일정 차질 없이 진행 중"
+        ]
+    }
+    return mock_sentiment
+
+```
+
+---
+
+### 4. `routers/backtest.py` (백테스팅 라우터)
+
+사용자 정의 조건식에 기반한 백테스트 엔진 구동을 담당합니다.
+
+```python
+from fastapi import APIRouter, Depends, HTTPException
+import schemas
+import uuid
+# from database import get_db
+
+router = APIRouter(prefix="/api/v1/backtest", tags=["Backtest Engine"])
+
+@router.post("/run", response_model=schemas.BacktestRunResponse)
+async def run_backtest(
+    request: schemas.BacktestRunRequest,
+    # db: Session = Depends(get_db)
+):
+    """
+    사용자가 설정한 조건으로 과거 데이터를 백테스팅하고 결과를 반환합니다.
+    """
+    # TODO: request 조건식을 파싱하여 백테스트 엔진(Pandas/Numpy) 구동
+    # TODO: 결과를 BacktestRecord 테이블에 저장
+    
+    mock_result = {
+        "backtest_id": str(uuid.uuid4()),
+        "cagr": 18.4,
+        "mdd": -15.2,
+        "sharpe_ratio": 1.45,
+        "trade_logs": [
+            {"date": "2025-10-15", "action": "BUY", "price": 110.0, "reason": "VIX > 30"},
+            {"date": "2026-04-12", "action": "SELL", "price": 135.0, "reason": "RSI > 70"}
+        ]
+    }
+    return mock_result
+
+```
+
+---
+
+### 5. `main.py` (애플리케이션 진입점)
+
+라우터들을 하나의 앱으로 묶어 실행합니다.
+
+```python
+from fastapi import FastAPI
+from routers import macro, backtest
+# from routers import auth
+
+app = FastAPI(
+    title="AlphaMacro API",
+    description="거시경제 지표 및 주식 상관관계 분석, AI 감성 분석을 위한 API",
+    version="1.0.0"
+)
+
+# 라우터 등록
+# app.include_router(auth.router)
+app.include_router(macro.router)
+app.include_router(backtest.router)
+
+@app.get("/health", tags=["System"])
+async def health_check():
+    """서버 상태 확인용 엔드포인트"""
+    return {"status": "ok", "message": "AlphaMacro Engine is running"}
+
+```
+
+
+
+
+```python
+markdown_content = """# FastAPI + PyTorch (FinBERT) 추론 파이프라인 연동 가이드
+
+FastAPI와 로컬 환경의 PyTorch 기반 FinBERT 모델을 결합하여 실시간 뉴스/공시 감성 분석을 수행하는 백엔드 파이프라인입니다. 
+서버 시작 시 메모리에 모델을 1회 적재(Lifespan 이벤트 활용)하여 API 호출 시의 추론(Inference) 지연 시간을 최소화합니다.
+
+---
+
+## 1. 요구사항 및 패키지 설치 (`requirements.txt`)
+모델 로드와 추론을 위해 `transformers`와 `torch` 패키지가 필요합니다.
+
+```text
+fastapi==0.104.1
+uvicorn==0.24.0
+torch==2.1.0
+transformers==4.35.0
+pydantic==2.5.2
+
+```
+
+---
+
+## 2. AI 추론 엔진 모듈 (`services/ai_engine.py`)
+
+Hugging Face의 `ProsusAI/finbert` 모델을 로컬 디바이스(CPU/GPU/MPS)에 적재하고, 텍스트 입력 시 `[-1.0, 1.0]` 사이의 감성 점수를 반환하는 클래스입니다.
+
+```python
+import torch
+import torch.nn.functional as F
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
+
+class FinBERTAnalyzer:
+    def __init__(self):
+        self.model_name = "ProsusAI/finbert"
+        # 환경에 맞는 디바이스 자동 할당 (GPU, Apple Silicon MPS, 또는 CPU)
+        if torch.cuda.is_available():
+            self.device = torch.device("cuda")
+        elif torch.backends.mps.is_available():
+            self.device = torch.device("mps")
+        else:
+            self.device = torch.device("cpu")
+            
+        self.tokenizer = None
+        self.model = None
+
+    def load_model(self):
+        \"\"\"서버 구동 시 모델을 메모리에 로드합니다.\"\"\"
+        print(f"Loading {self.model_name} on {self.device}...")
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+        self.model = AutoModelForSequenceClassification.from_pretrained(self.model_name)
+        self.model.to(self.device)
+        self.model.eval() # 추론 모드로 전환
+        print("FinBERT Model loaded successfully.")
+
+    def analyze_sentiment(self, text_list: list[str]) -> float:
+        \"\"\"
+        텍스트 리스트를 입력받아 평균 감성 점수를 계산합니다.
+        점수 범위: -1.0 (매우 부정) ~ 1.0 (매우 긍정)
+        \"\"\"
+        if not text_list:
+            return 0.0
+
+        # 토큰화 (패딩 및 잘라내기 적용)
+        inputs = self.tokenizer(
+            text_list, 
+            padding=True, 
+            truncation=True, 
+            max_length=512, 
+            return_tensors="pt"
+        ).to(self.device)
+
+        with torch.no_grad():
+            outputs = self.model(**inputs)
+            logits = outputs.logits
+            probs = F.softmax(logits, dim=1)
+            
+        # ProsusAI/finbert 라벨: 0: positive, 1: negative, 2: neutral
+        # 점수 계산 = 긍정 확률(%) - 부정 확률(%)
+        pos_probs = probs[:, 0]
+        neg_probs = probs[:, 1]
+        
+        # 각 문장의 감성 점수 계산 후 전체 평균 도출
+        scores = pos_probs - neg_probs
+        avg_score = scores.mean().item()
+        
+        return round(avg_score, 4)
+
+# 싱글톤 인스턴스 생성
+sentiment_analyzer = FinBERTAnalyzer()
+
+```
+
+---
+
+## 3. 앱 라이프사이클 관리 (`main.py`)
+
+FastAPI의 `@asynccontextmanager`를 사용하여 서버가 켜질 때 단 한 번만 무거운 PyTorch 모델을 로드하도록 구성합니다.
+
+```python
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
+from routers import macro
+from services.ai_engine import sentiment_analyzer
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: AI 모델 로컬 메모리에 로드
+    sentiment_analyzer.load_model()
+    yield
+    # Shutdown: 필요시 메모리 해제 로직 추가
+    print("Shutting down AI Engine...")
+
+app = FastAPI(
+    title="AlphaMacro",
+    lifespan=lifespan
+)
+
+# 라우터 등록
+app.include_router(macro.router)
+
+```
+
+---
+
+## 4. API 라우터 연동 (`routers/macro.py`)
+
+실제 API 요청이 들어왔을 때 크롤링된 뉴스(임시 데이터)를 추론 엔진에 전달하여 결과를 반환합니다.
+
+```python
+from fastapi import APIRouter, HTTPException
+from schemas import SentimentResponse
+from services.ai_engine import sentiment_analyzer
+import asyncio
+
+router = APIRouter(prefix="/api/v1/ai", tags=["AI Analytics"])
+
+@router.get("/sentiment/{ticker}", response_model=SentimentResponse)
+async def get_ai_sentiment(ticker: str):
+    \"\"\"
+    관심 종목의 최근 공시 및 뉴스를 FinBERT로 분석하여 감성 점수를 반환합니다.
+    \"\"\"
+    # [가정] 외부 뉴스 크롤러나 로컬 파일에서 텍스트를 가져오는 로직 (비동기 처리 권장)
+    # 실제 구현 시에는 별도의 크롤링 모듈(BeautifulSoup 등)을 호출합니다.
+    mock_news_data = [
+        f"{ticker} announces record breaking revenue for Q3, exceeding expectations.",
+        f"Supply chain issues might delay {ticker}'s new product launch next year.",
+        f"{ticker} acquires a new AI startup to boost on-device capabilities."
+    ]
+    
+    try:
+        # 이벤트 루프를 블로킹하지 않기 위해 I/O 바운드/CPU 바운드 작업을 스레드 풀에서 실행
+        sentiment_score = await asyncio.to_thread(
+            sentiment_analyzer.analyze_sentiment, 
+            mock_news_data
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Model Inference Error: {str(e)}")
+
+    return SentimentResponse(
+        ticker=ticker.upper(),
+        sentiment_score=sentiment_score,
+        summary=mock_news_data # 실제로는 LLM 등을 통해 3줄 요약된 데이터를 반환
+    )
+
+```
+
+"""
+
+file_path = "/mnt/data/FinBERT_FastAPI_Pipeline.md"
+with open(file_path, "w", encoding="utf-8") as f:
+f.write(markdown_content)
+
+print(f"File generated successfully: {file_path}")
+
+```
+
+```text?code_stdout&code_event_index=1
+File generated successfully: /mnt/data/FinBERT_FastAPI_Pipeline.md
+
+
+```
+
+요청하신 FastAPI와 FinBERT 연동 파이프라인 마크다운 문서가 준비되었습니다.
+
+
+이번 파이프라인의 핵심은 **서버 리소스 최적화**와 **비동기 처리**입니다.
+
+1. **Lifespan 이벤트 활용:** 과거 방식인 `on_event("startup")` 대신, FastAPI의 최신 규격인 `@asynccontextmanager`를 사용하여 서버가 시작될 때 무거운 PyTorch 모델을 메모리에 단 한 번만 적재하도록 설계했습니다. 이를 통해 매 API 호출마다 발생하는 모델 로딩 지연을 완전히 제거했습니다.
+2. **비동기 논블로킹 (Non-blocking):** `asyncio.to_thread`를 사용하여 PyTorch의 텐서 연산(CPU/GPU 바운드 작업)이 FastAPI의 메인 비동기 이벤트 루프를 멈추지 않도록 분리했습니다.
+3. **디바이스 자동 할당:** 로컬 환경에서 테스트하실 때 성능을 최대한 끌어낼 수 있도록 CUDA(GPU)나 Mac의 MPS, 혹은 CPU를 자동으로 감지하여 텐서를 할당하는 로직을 포함했습니다.
+
+추가적으로 구현된 코드에서 크롤링 모듈을 덧붙이거나 백테스팅 데이터 파이프라인을 연결하고 싶으시다면 언제든 말씀해 주세요.

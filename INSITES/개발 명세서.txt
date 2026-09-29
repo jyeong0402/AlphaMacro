@@ -1,0 +1,134 @@
+# [개발 명세서] AlphaMacro: Macro-Driven Stock Intelligence Platform
+
+## 1. 프로젝트 개요 (Overview)
+
+* **프로젝트명:** AlphaMacro 
+* **목적:** 거시경제 지표와 개별 주식 간의 상관관계를 분석하고, 뉴스/공시 감성 분석 및 정교한 백테스팅을 단일 플랫폼에서 제공하는 지능형 주식 분석 시스템.
+* **핵심 파이프라인:** 매크로 지표 관찰 ➔ 종목 상관성 분석 ➔ 시그널 조건 생성 ➔ 과거 검증(백테스트) ➔ 투자 성과 도출
+* **타겟 사용자:** 거시경제 흐름을 고려하여 체계적인 분할 매수/매도 전략을 수립하고자 하는 개인 및 전문 투자자.
+
+---
+
+## 2. 시스템 아키텍처 (System Architecture)
+
+```text
+[ Client (App/Web) ]
+  ├── Mobile: Flutter (iOS / Android)
+  └── Web: React (Next.js)
+        │
+        ▼ (REST / WebSocket)
+[ API Gateway & Auth (FastAPI / JWT) ]
+        │
+        ├──► [ Macro Analytics ] ──► (Yahoo Finance, FRED API)
+        ├──► [ Sentiment AI ] ────► (Server-side Local AI / PyTorch FinBERT)
+        └──► [ Backtest Engine ] ──► (Pandas / Numpy, 전략 파서 & 시그널 생성)
+        │
+        ▼
+[ Database Layer ]
+  ├── PostgreSQL (사용자, 시장 데이터, 뉴스, 백테스트 결과 및 거래일지)
+  └── Redis (실시간 지표, 세션, P95 200ms 이내 핫 데이터 캐싱)
+```
+
+* **AI 실행 방식 정의:** 모바일 기기에서 돌아가는 '온디바이스 AI'가 아닌, FastAPI 서버 내부에서 독립적으로 모델을 추론하는 **서버 로컬 AI(Server-side Local AI Inference)** 방식으로 규정.
+
+---
+
+## 3. 세부 기능 명세 (Detailed Feature Specifications)
+
+### 3.1. 매크로 지표 & 개별 종목 상관관계 분석
+| 구분 | 내용 |
+| :--- | :--- |
+| **기능 설명** | 미국 기준금리, 국채금리(US10Y), 환율, VIX 등과 지정 종목(예: NVDA) 간의 상관계수 산출 |
+| **Input** | `ticker`, `indicator`, `period`, `correlation_type` |
+| **Process** | 1. 장기 우상향 추세로 인한 왜곡을 막기 위해 **일간 수익률(Daily Return)** 기준 데이터 변환<br>2. 결측치 처리 후 피어슨 상관계수 계산<br>3. RSI(14) 및 MACD 연산 |
+| **Output** | 수익률 기반 상관계수, Dual-axis Time Series Chart, RSI/MACD 지표 상태 |
+
+### 3.2. 서버 로컬 AI 공시/뉴스 감성 분석
+| 구분 | 내용 |
+| :--- | :--- |
+| **기능 설명** | 금융 뉴스 및 SEC 공시(10-K, 10-Q) 데이터를 수집하여 긍정/부정 스코어링 및 요약 |
+| **Input** | `ticker`, `date_range` |
+| **Process** | 1. News/SEC 텍스트 파싱 및 전처리<br>2. 서버에 적재된 PyTorch 기반 FinBERT 추론<br>3. [-1.0(악재) ~ +1.0(호재)] 범위의 감성 지수 및 3줄 요약 추출 |
+| **Output** | 뉴스 감성 Timeline, 호재/악재 태그 비율, 최신 뉴스 요약 카드 |
+
+### 3.3. 매크로 연동 전략 백테스팅 엔진
+| 구분 | 내용 |
+| :--- | :--- |
+| **기능 설명** | 사용자 정의 조건식에 기반한 과거 데이터 기반 투자 성과 시뮬레이션 |
+| **Input** | `initial_capital`, `buy_conditions`, `sell_conditions`, `commission_rate`, `slippage_rate` |
+| **Process** | 1. **Look-ahead Bias 방지:** t일 종가 기준 시그널 생성 ➔ t+1일 시가 거래 체결<br>2. 거래 수수료 및 슬리피지(Slippage) 반영<br>3. Benchmark(S&P 500) 대비 성과(CAGR, MDD, Sharpe Ratio) 도출 |
+| **Output** | 누적 수익률 그래프(vs S&P 500), 월별 Heatmap, 상세 거래 일지 |
+
+---
+
+## 4. 데이터베이스 설계 (Database Schema Outline)
+
+### `stock_prices` (주식 가격 및 기술적 지표)
+* `ticker` (VARCHAR(10), PK)
+* `date` (DATE, PK)
+* `open_price`, `high_price`, `low_price`, `close_price` (DECIMAL)
+* `volume` (BIGINT)
+* `rsi_14` (DECIMAL(8,4))
+* `macd`, `macd_signal` (DECIMAL(10,4))
+
+### `financial_news` (뉴스 및 감성 분석 데이터)
+* `news_id` (UUID, PK)
+* `ticker` (VARCHAR(10))
+* `title`, `source`, `url` (TEXT / VARCHAR)
+* `sentiment_score` (DECIMAL(6,4))
+* `summary` (TEXT)
+
+### `backtest_records` & `backtest_trades` (백테스트 및 거래 일지)
+* **[Records]** `backtest_id` (PK), `user_id` (FK), `cagr`, `mdd`, `sharpe_ratio`, `total_return`
+* **[Trades]** `trade_id` (PK), `backtest_id` (FK), `trade_date`, `side` (BUY/SELL), `price`, `quantity`, `commission`, `slippage`
+
+*(참고: `users`와 `macro_indicators` 테이블은 기존 명세 유지)*
+
+---
+
+## 5. API 명세 (API Endpoints)
+
+### 5.1 Macro Analytics
+* **GET** `/api/v1/macro/correlation`
+  * **Query:** `?ticker=NVDA&indicator=VIX&period=1Y&correlation_type=return`
+  * **Response:**
+    ```json
+    {
+      "ticker": "NVDA", "indicator": "VIX",
+      "correlation": -0.65, "correlation_type": "return",
+      "latest_rsi": 32.1, "latest_macd": -1.5
+    }
+    ```
+
+### 5.2 AI Sentiment
+* **GET** `/api/v1/ai/sentiment/{ticker}`
+  * **Response:**
+    ```json
+    {
+      "ticker": "NVDA", "sentiment_score": 0.74, "sentiment_label": "positive",
+      "summary": ["데이터센터 GPU 수요 증가", "매출 가이던스 상향"]
+    }
+    ```
+
+### 5.3 Backtest Engine
+* **POST** `/api/v1/backtest/run`
+  * **Request Body:**
+    ```json
+    {
+      "ticker": "NVDA", "start_date": "2023-01-01", "end_date": "2024-01-01",
+      "buy_conditions": [{"indicator": "VIX", "operator": ">=", "value": 30}],
+      "commission_rate": 0.0005, "slippage_rate": 0.001
+    }
+    ```
+
+---
+
+## 6. 비기능적 요구사항 (Non-Functional Requirements)
+
+1. **데이터 수집 및 갱신 정책 (Data Refresh):**
+   * 단순 시간(06:00) 지정이 아닌 서머타임(DST)을 고려하여, **KST 기준 06:00 이후 외부 제공자의 최신 데이터 반영 여부를 확인(Polling)한 후 배치 저장** 수행.
+2. **성능 (Performance):**
+   * 캐시 히트 시 P95 200ms 이내, 신규 상관관계 연산 시 1.5초 이내.
+   * 단일 종목 5년 치 백테스트 처리 시간 3초 이내 목표.
+3. **신뢰성 (Reliability):**
+   * 외부 금융 API 장애 대비 Timeout 및 Retry 로직 구성, 장애 시 마지막 정상 데이터 유지.

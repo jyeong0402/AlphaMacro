@@ -1,0 +1,17 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+psycopg2-binary
+pydantic-settings
+redis
+pandas
+numpy
+torch
+transformers
+python-jose[cryptography]
+passlib[bcrypt]
+bcrypt<4.1
+httpx
+beautifulsoup4
+yfinance
+email-validator
